@@ -1,0 +1,1 @@
+npm install express ws multer discord.js-selfbot-v13 @discordjs/voice sodium-native @discordjs/opus ffmpeg-static @snazzah/davey
