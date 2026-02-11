@@ -24,7 +24,6 @@ WsServer.on('connection', (Socket) => {
             const ParsedData = JSON.parse(RawData);
             if (ParsedData.Type === 'Init') {
                 Socket.BotId = ParsedData.Id;
-                process.stdout.write(`\r\x1b[32m[LOGIN]\x1b[0m Bot: ${ParsedData.Username} (${ParsedData.Id}) is Ready\n> `);
             }
         } catch (Error) {}
     });
