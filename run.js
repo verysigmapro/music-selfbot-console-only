@@ -7,13 +7,18 @@ const Path = require("path");
 const BotTokens = [
   "MTMxOTEzMDQwNTkyMzk3OTI4NA.GtrL_x.CA274IkV9hTxq6kMnf9zdECJ4iTvvh6mCiHkqo",
   "MTEyNDE4MTUzMjA4NTU5MjA2NA.GOxcms.uysgFfNbj3eGXA6oJzsIG82IqRpTXoiudMFfCE",
+  "MTQ2MzU2MjI3MTcxOTY5MDM0Nw.G-Y5Z0.vCqHF9FxJ7mgBNpaQjUTuUPEgqcxdQiUnH6GZc",
+  "MTE0MjY1MDY4ODc2NjIzMDY0OA.GerGsT.nZApzxoVQ-usLLtlBOe2TBsZaHyYnMBZNup5Uw",
+  "MTI2ODE5MjA3ODg2NTYzMzQyNg.GugQlK.CV0G2BqY1dS4Oz4r1WYGYLuOYfXR451g_Sdcx8",
+  "MTE3MzYyMDE5NzQxMjgzOTU1NA.G0yJFZ.oAnR3CzF2f1D-axBoEZikMREG-i5WxZViRJtPU",
+  "MTQxNjM4NzkxODM5MzY0MzEzOQ.Gn2Ayg.Dqecp_nQ2h5_D6vQ8gRn7hDyMeseisqjYWxJ6E",
 ];
 const TargetGuildId = "1265979210426613841";
 const TargetVoiceId = "1310722034539434014";
 const AudioPath = Path.join(__dirname, "audio");
 
 const StartProcess = (Script, Args) =>
-  spawn("node", ["--no-warnings", Script, ...Args], {
+  spawn("node", ["--no-warnings", "--expose-gc", Script, ...Args], {
     stdio: ["inherit", "pipe", "inherit"],
   });
 
@@ -45,7 +50,7 @@ setTimeout(() => {
     setTimeout(
       () =>
         StartProcess("bothandler.js", [Token, TargetGuildId, TargetVoiceId]),
-      Index * 1000
+      Index * 1250
     );
   });
 }, 2000);
@@ -56,15 +61,13 @@ const Interface = Readline.createInterface({
 });
 Interface.setPrompt("> ");
 
-console.log("join | stop | list | play <number> ");
+console.log("join | stop | list | play <number>");
 
 Interface.on("line", (Line) => {
   const Input = Line.trim();
   if (!Input) return Interface.prompt();
-
   const FileArray = GetFileList();
   const CleanInput = Input.replace(/"/g, "").replace(".ogg", "");
-
   if (CleanInput === "join") {
     PostCommand("/join");
   } else if (CleanInput === "stop") {
