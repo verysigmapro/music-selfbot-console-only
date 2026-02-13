@@ -1,40 +1,51 @@
-const Express = require('express');
-const WebSocket = require('ws');
-const Path = require('path');
-const Fs = require('fs');
-const Http = require('http');
-
+const net = require("net");
+const Express = require("express");
+const Fs = require("fs");
+const Path = require("path");
 const ExpressApp = Express();
-const HttpServer = Http.createServer(ExpressApp);
-const WsServer = new WebSocket.Server({ server: HttpServer });
-const AudioDirectory = Path.join(__dirname, 'audio');
+const SP = "/tmp/bot.sock";
 
-if (!Fs.existsSync(AudioDirectory)) Fs.mkdirSync(AudioDirectory);
+if (Fs.existsSync(SP)) Fs.unlinkSync(SP);
 
-const BroadcastData = (Data) => {
-    const Payload = JSON.stringify(Data);
-    WsServer.clients.forEach(Client => {
-        if (Client.readyState === WebSocket.OPEN) Client.send(Payload);
-    });
+const Clients = new Set();
+const Tcp = net.createServer((s) => {
+  s.setNoDelay(true);
+  Clients.add(s);
+  s.on("close", () => Clients.delete(s));
+  s.on("error", () => {});
+});
+
+const S = (t, ms, i) => {
+  const b = Buffer.allocUnsafe(5);
+  b[0] = (t << 6) | (i & 0x3f);
+  b[1] = ms >> 24;
+  b[2] = ms >> 16;
+  b[3] = ms >> 8;
+  b[4] = ms;
+  for (const c of Clients) c.write(b);
 };
 
-WsServer.on('connection', (Socket) => {
-    Socket.on('message', (RawData) => {
-        try {
-            const ParsedData = JSON.parse(RawData);
-            if (ParsedData.Type === 'Init') {
-                Socket.BotId = ParsedData.Id;
-            }
-        } catch (Error) {}
-    });
-});
-
 ExpressApp.use(Express.json());
-ExpressApp.post('/join', (Req, Res) => { BroadcastData({ Type: 'Join' }); Res.json({ Status: 'OK' }); });
-ExpressApp.post('/stop', (Req, Res) => { BroadcastData({ Type: 'Stop' }); Res.json({ Status: 'OK' }); });
-ExpressApp.post('/play', (Req, Res) => {
-    BroadcastData({ Type: 'Play', PlayTime: Date.now() + 800, AudioKey: Req.body.AudioKey });
-    Res.json({ Status: 'OK' });
+ExpressApp.post("/join", (req, res) => {
+  S(0, 0, 0);
+  res.json({ s: 1 });
+});
+ExpressApp.post("/stop", (req, res) => {
+  S(1, 0, 0);
+  res.json({ s: 1 });
+});
+ExpressApp.post("/update", (req, res) => {
+  S(2, 0, 0);
+  res.json({ s: 1 });
+});
+ExpressApp.post("/play", (req, res) => {
+  const f = Fs.readdirSync(Path.join(__dirname, "audio"))
+    .filter((x) => x.endsWith(".ogg"))
+    .sort();
+  const i = f.indexOf(req.body.AudioKey + ".ogg");
+  if (i !== -1) S(3, (Date.now() + 350) >>> 0, i);
+  res.json({ s: 1 });
 });
 
-HttpServer.listen(3000, '0.0.0.0');
+Tcp.listen(SP);
+ExpressApp.listen(3000, "0.0.0.0");
