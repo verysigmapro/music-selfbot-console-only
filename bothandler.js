@@ -7,16 +7,16 @@ const {
   entersState,
   StreamType,
 } = require("@discordjs/voice");
-const WebSocket = require("ws");
+const net = require("net");
 const Fs = require("fs");
 const Path = require("path");
 const { Readable } = require("stream");
 
-const [, , Token, GuildId, VoiceChannelId] = process.argv;
-const WsUrl = "ws://localhost:3000";
-const AudioPath = Path.join(__dirname, "audio");
+const [, , Token, Gid, Vid] = process.argv;
+const AP = Path.join(__dirname, "audio");
+const SP = "/tmp/bot.sock";
 
-const Client = new Discord.Client({
+const C = new Discord.Client({
   checkUpdate: false,
   makeCache: Discord.Options.cacheWithLimits({
     MessageManager: 0,
@@ -36,82 +36,72 @@ const Client = new Discord.Client({
   }),
 });
 
-let VoiceConnection = null;
-const BotPlayer = createAudioPlayer();
-const AudioBufferMap = new Map();
-let WsSocket = null;
+let VC = null;
+const P = createAudioPlayer();
+let BM = [];
 
-const LoadAllAudio = () => {
-  AudioBufferMap.clear();
-  if (!Fs.existsSync(AudioPath)) return;
-  Fs.readdirSync(AudioPath).forEach((File) => {
-    if (File.endsWith(".ogg")) {
-      AudioBufferMap.set(
-        File.replace(".ogg", ""),
-        Fs.readFileSync(Path.join(AudioPath, File))
-      );
-    }
-  });
+const L = () => {
+  if (!Fs.existsSync(AP)) return;
+  BM = Fs.readdirSync(AP)
+    .filter((f) => f.endsWith(".ogg"))
+    .sort()
+    .map((f) => Fs.readFileSync(Path.join(AP, f)));
 };
 
-const InitializeWebSocket = () => {
-  WsSocket = new WebSocket(WsUrl);
-  WsSocket.on("open", () =>
-    WsSocket.send(
-      JSON.stringify({
-        Type: "Init",
-        Id: Client.user.id,
-        Username: Client.user.username,
-      })
-    )
-  );
-  WsSocket.on("message", async (Data) => {
-    const Message = JSON.parse(Data);
-    if (Message.Type === "Play") {
-      const Buffer = AudioBufferMap.get(Message.AudioKey);
-      if (Buffer && VoiceConnection)
-        ExecuteSyncPlay(
-          Buffer,
-          Message.PlayTime - (VoiceConnection.ping.udp || 0)
-        );
-    } else if (Message.Type === "Join") {
-      try {
-        const TargetGuild = await Client.guilds.fetch(GuildId);
-        VoiceConnection = joinVoiceChannel({
-          channelId: VoiceChannelId,
-          guildId: GuildId,
-          adapterCreator: TargetGuild.voiceAdapterCreator,
+const Conn = () => {
+  const s = net.createConnection(SP);
+  s.setNoDelay(true);
+  s.on("data", (d) => {
+    let c = 0;
+    while (c + 5 <= d.length) {
+      const t = d[c] >> 6;
+      const i = d[c] & 0x3f;
+      const ms =
+        ((d[c + 1] << 24) | (d[c + 2] << 16) | (d[c + 3] << 8) | d[c + 4]) >>>
+        0;
+      if (t === 3) {
+        const buf = BM[i];
+        if (buf && VC) {
+          const res = createAudioResource(Readable.from(buf), {
+            inputType: StreamType.OggOpus,
+          });
+          const now = Date.now() >>> 0;
+          Sync(res, Date.now() - (now - ms) - (VC.ping.udp || 0));
+        }
+      } else if (t === 0) {
+        C.guilds.fetch(Gid).then((g) => {
+          VC = joinVoiceChannel({
+            channelId: Vid,
+            guildId: Gid,
+            adapterCreator: g.voiceAdapterCreator,
+          });
+          entersState(VC, VoiceConnectionStatus.Ready, 2e4).then(() =>
+            VC.subscribe(P)
+          );
         });
-        await entersState(VoiceConnection, VoiceConnectionStatus.Ready, 20000);
-        VoiceConnection.subscribe(BotPlayer);
-      } catch (Err) {}
-    } else if (Message.Type === "Stop") {
-      BotPlayer.stop();
-    } else if (Message.Type === "Update") {
-      LoadAllAudio();
+      } else if (t === 1) {
+        P.stop();
+        if (global.gc) global.gc();
+      } else if (t === 2) L();
+      c += 5;
     }
   });
-  WsSocket.on("close", () => setTimeout(InitializeWebSocket, 1000));
+  s.on("close", () => setTimeout(Conn, 1000));
+  s.on("error", () => {});
 };
 
-const ExecuteSyncPlay = (Buffer, TargetTimeMs) => {
-  const Resource = createAudioResource(Readable.from(Buffer), {
-    inputType: StreamType.OggOpus,
-    inlineVolume: false,
-  });
-  const TargetNano = BigInt(TargetTimeMs) * 1000000n;
-  const StartHrTime = process.hrtime.bigint();
-  const TimeDiffNano = TargetNano - BigInt(Date.now()) * 1000000n;
-
+const Sync = (res, t) => {
+  const tn = BigInt(Math.floor(t)) * 1000000n;
+  const startHr = process.hrtime.bigint();
+  const diff = tn - BigInt(Date.now()) * 1000000n;
   setTimeout(() => {
-    while (process.hrtime.bigint() - StartHrTime < TimeDiffNano) {}
-    BotPlayer.play(Resource);
-  }, Math.max(0, Number(TimeDiffNano / 1000000n) - 5));
+    while (process.hrtime.bigint() - startHr < diff) {}
+    P.play(res);
+  }, Math.max(0, Number(diff / 1000000n) - 1));
 };
 
-Client.once("ready", () => { 
-    LoadAllAudio(); 
-    InitializeWebSocket(); 
-    //console.log(`LOADED ${Client.user.username}`);
+C.once("ready", () => {
+  L();
+  Conn();
 });
-Client.login(Token);
+C.login(Token);
