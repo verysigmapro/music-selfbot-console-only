@@ -1,12 +1,5 @@
 const Discord = require("discord.js-selfbot-v13");
-const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  VoiceConnectionStatus,
-  entersState,
-  StreamType,
-} = require("@discordjs/voice");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType } = require("@discordjs/voice");
 const net = require("net");
 const Fs = require("fs");
 const Path = require("path");
@@ -19,20 +12,10 @@ const SP = "/tmp/bot.sock";
 const C = new Discord.Client({
   checkUpdate: false,
   makeCache: Discord.Options.cacheWithLimits({
-    MessageManager: 0,
-    PresenceManager: 0,
-    UserManager: 0,
-    GuildMemberManager: 0,
-    ThreadManager: 0,
-    GuildEmojiManager: 0,
-    ReactionManager: 0,
-    GuildBanManager: 0,
-    GuildInviteManager: 0,
-    StageInstanceManager: 0,
-    GuildScheduledEventManager: 0,
-    GuildManager: Infinity,
-    ChannelManager: Infinity,
-    VoiceStateManager: Infinity,
+    MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
+    ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
+    GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
+    GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
   }),
 });
 
@@ -42,10 +25,7 @@ let BM = [];
 
 const L = () => {
   if (!Fs.existsSync(AP)) return;
-  BM = Fs.readdirSync(AP)
-    .filter((f) => f.endsWith(".ogg"))
-    .sort()
-    .map((f) => Fs.readFileSync(Path.join(AP, f)));
+  BM = Fs.readdirSync(AP).filter((f) => f.endsWith(".ogg")).sort().map((f) => Fs.readFileSync(Path.join(AP, f)));
 };
 
 const Conn = () => {
@@ -53,37 +33,27 @@ const Conn = () => {
   s.setNoDelay(true);
   s.on("data", (d) => {
     let c = 0;
-    while (c + 5 <= d.length) {
+    while (c + 4 <= d.length) {
       const t = d[c] >> 6;
       const i = d[c] & 0x3f;
-      const ms =
-        ((d[c + 1] << 24) | (d[c + 2] << 16) | (d[c + 3] << 8) | d[c + 4]) >>>
-        0;
+      const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]) & 0xffffff;
       if (t === 3) {
         const buf = BM[i];
         if (buf && VC) {
-          const res = createAudioResource(Readable.from(buf), {
-            inputType: StreamType.OggOpus,
-          });
-          const now = Date.now() >>> 0;
-          Sync(res, Date.now() - (now - ms) - (VC.ping.udp || 0));
+          const res = createAudioResource(Readable.from(buf), { inputType: StreamType.OggOpus });
+          const now = Date.now();
+          let target = (now - (now & 0xffffff)) + ms;
+          if (target < now - 1000000) target += 0x1000000;
+          Sync(res, target - (VC.ping.udp || 0));
         }
       } else if (t === 0) {
         C.guilds.fetch(Gid).then((g) => {
-          VC = joinVoiceChannel({
-            channelId: Vid,
-            guildId: Gid,
-            adapterCreator: g.voiceAdapterCreator,
-          });
-          entersState(VC, VoiceConnectionStatus.Ready, 2e4).then(() =>
-            VC.subscribe(P)
-          );
+          VC = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: g.voiceAdapterCreator });
+          entersState(VC, VoiceConnectionStatus.Ready, 2e4).then(() => VC.subscribe(P));
         });
-      } else if (t === 1) {
-        P.stop();
-        if (global.gc) global.gc();
-      } else if (t === 2) L();
-      c += 5;
+      } else if (t === 1) { P.stop(); if (global.gc) global.gc(); }
+      else if (t === 2) L();
+      c += 4;
     }
   });
   s.on("close", () => setTimeout(Conn, 1000));
@@ -100,8 +70,5 @@ const Sync = (res, t) => {
   }, Math.max(0, Number(diff / 1000000n) - 1));
 };
 
-C.once("ready", () => {
-  L();
-  Conn();
-});
+C.once("ready", () => { L(); Conn(); });
 C.login(Token);
