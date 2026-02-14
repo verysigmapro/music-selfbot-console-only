@@ -5,16 +5,13 @@ const Fs = require("fs");
 const Path = require("path");
 
 const BotTokens = [
-  "MTMxOTEzMDQwNTkyMzk3OTI4NA.GtrL_x.CA274IkV9hTxq6kMnf9zdECJ4iTvvh6mCiHkqo",
-  "MTEyNDE4MTUzMjA4NTU5MjA2NA.GOxcms.uysgFfNbj3eGXA6oJzsIG82IqRpTXoiudMFfCE",
-  "MTQ2MzU2MjI3MTcxOTY5MDM0Nw.G-Y5Z0.vCqHF9FxJ7mgBNpaQjUTuUPEgqcxdQiUnH6GZc",
-  "MTE0MjY1MDY4ODc2NjIzMDY0OA.GerGsT.nZApzxoVQ-usLLtlBOe2TBsZaHyYnMBZNup5Uw",
-  "MTI2ODE5MjA3ODg2NTYzMzQyNg.GugQlK.CV0G2BqY1dS4Oz4r1WYGYLuOYfXR451g_Sdcx8",
-  "MTE3MzYyMDE5NzQxMjgzOTU1NA.G0yJFZ.oAnR3CzF2f1D-axBoEZikMREG-i5WxZViRJtPU",
-  "MTQxNjM4NzkxODM5MzY0MzEzOQ.Gn2Ayg.Dqecp_nQ2h5_D6vQ8gRn7hDyMeseisqjYWxJ6E",
+  "MTMxOTEzMDQwNTkyMzk3OTI4NA.GFIuVT.ie80xQqVybw0PANRbrFbpdZ8zCSw_9xDa1Tyho",
+  "MTE3MzYyMDE5NzQxMjgzOTU1NA.GyuPZh.qOQVKFGqsdqITZMM2FzYzuh030k0ueGlvgCyWE",
+  "MTE0MjY1MDY4ODc2NjIzMDY0OA.G7QRJs.euVJP5QNwkBwizhf5Gg75KevCRCzDnVe8NPMF0",
+  "MTQxNjM4NzkxODM5MzY0MzEzOQ.Gy9Teh.hXPXl7VJxKrTrHAZ7DrsJwIKM9GavNltjegSgQ",
 ];
-const TargetGuildId = "1265979210426613841";
-const TargetVoiceId = "1310722034539434014";
+const TargetGuildId = "1238452317838377035";
+const TargetVoiceId = "1472098672128032911";
 const AudioPath = Path.join(__dirname, "audio");
 
 const StartProcess = (Script, Args) =>
