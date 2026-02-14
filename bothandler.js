@@ -4,11 +4,9 @@ const net = require("net");
 const Fs = require("fs");
 const Path = require("path");
 const { Readable } = require("stream");
-
 const [, , Token, Gid, Vid] = process.argv;
 const AP = Path.join(__dirname, "audio");
 const SP = "/tmp/bot.sock";
-
 const C = new Discord.Client({
   checkUpdate: false,
   makeCache: Discord.Options.cacheWithLimits({
@@ -18,16 +16,13 @@ const C = new Discord.Client({
     GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
   }),
 });
-
 let VC = null;
 const P = createAudioPlayer();
 let BM = [];
-
 const L = () => {
   if (!Fs.existsSync(AP)) return;
   BM = Fs.readdirSync(AP).filter((f) => f.endsWith(".ogg")).sort().map((f) => Fs.readFileSync(Path.join(AP, f)));
 };
-
 const Conn = () => {
   const s = net.createConnection(SP);
   s.setNoDelay(true);
@@ -36,14 +31,15 @@ const Conn = () => {
     while (c + 4 <= d.length) {
       const t = d[c] >> 6;
       const i = d[c] & 0x3f;
-      const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]) & 0xffffff;
+      const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]);
       if (t === 3) {
         const buf = BM[i];
         if (buf && VC) {
           const res = createAudioResource(Readable.from(buf), { inputType: StreamType.OggOpus });
           const now = Date.now();
-          let target = (now - (now & 0xffffff)) + ms;
-          if (target < now - 1000000) target += 0x1000000;
+          let target = (now & -16777216) | ms;
+          if (target < now - 5000000) target += 0x1000000;
+          else if (target > now + 5000000) target -= 0x1000000;
           Sync(res, target - (VC.ping.udp || 0));
         }
       } else if (t === 0) {
@@ -59,7 +55,6 @@ const Conn = () => {
   s.on("close", () => setTimeout(Conn, 1000));
   s.on("error", () => {});
 };
-
 const Sync = (res, t) => {
   const tn = BigInt(Math.floor(t)) * 1000000n;
   const startHr = process.hrtime.bigint();
@@ -69,6 +64,5 @@ const Sync = (res, t) => {
     P.play(res);
   }, Math.max(0, Number(diff / 1000000n) - 1));
 };
-
 C.once("ready", () => { L(); Conn(); });
 C.login(Token);
