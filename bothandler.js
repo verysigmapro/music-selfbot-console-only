@@ -6,7 +6,7 @@ const Path = require("path");
 const { Readable } = require("stream");
 const [, , Token, Gid, Vid] = process.argv;
 const AP = Path.join(__dirname, "audio");
-const SP = "/tmp/bot.sock";
+const SP = '/tmp/bot.sock';
 const C = new Discord.Client({
   checkUpdate: false,
   makeCache: Discord.Options.cacheWithLimits({
@@ -38,8 +38,8 @@ const Conn = () => {
           const res = createAudioResource(Readable.from(buf), { inputType: StreamType.OggOpus });
           const now = Date.now();
           let target = (now & -16777216) | ms;
-          if (target < now - 5000000) target += 0x1000000;
-          else if (target > now + 5000000) target -= 0x1000000;
+          if (target < now - 8000000) target += 0x1000000;
+          else if (target > now + 8000000) target -= 0x1000000;
           Sync(res, target - (VC.ping.udp || 0));
         }
       } else if (t === 0) {
@@ -53,16 +53,16 @@ const Conn = () => {
     }
   });
   s.on("close", () => setTimeout(Conn, 1000));
-  s.on("error", () => {});
 };
 const Sync = (res, t) => {
   const tn = BigInt(Math.floor(t)) * 1000000n;
-  const startHr = process.hrtime.bigint();
-  const diff = tn - BigInt(Date.now()) * 1000000n;
+  const hr = process.hrtime.bigint();
+  const d = tn - (BigInt(Date.now()) * 1000000n);
+  const wait = Number(d / 1000000n) - 1;
   setTimeout(() => {
-    while (process.hrtime.bigint() - startHr < diff) {}
+    while (process.hrtime.bigint() - hr < d) {}
     P.play(res);
-  }, Math.max(0, Number(diff / 1000000n) - 1));
+  }, wait > 0 ? wait : 0);
 };
 C.once("ready", () => { L(); Conn(); });
 C.login(Token);
