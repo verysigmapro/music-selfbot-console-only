@@ -15,8 +15,7 @@ const Tcp = net.createServer((s) => {
 const S = (t, ms, i) => {
   const b = Buffer.allocUnsafe(4);
   b[0] = (t << 6) | (i & 0x3f);
-  const v = ms & 0xffffff;
-  b[1] = v >> 16; b[2] = v >> 8; b[3] = v;
+  b[1] = ms >> 16; b[2] = ms >> 8; b[3] = ms;
   for (const c of Clients) c.write(b);
 };
 ExpressApp.use(Express.json());
