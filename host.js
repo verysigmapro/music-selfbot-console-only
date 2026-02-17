@@ -4,6 +4,7 @@ const Fs = require("fs");
 const Path = require("path");
 const ExpressApp = Express();
 const SP = "/tmp/bot.sock";
+const B4 = Buffer.allocUnsafe(4);
 if (Fs.existsSync(SP)) Fs.unlinkSync(SP);
 const Clients = new Set();
 const Tcp = net.createServer((s) => {
@@ -13,10 +14,9 @@ const Tcp = net.createServer((s) => {
   s.on("error", () => {});
 });
 const S = (t, ms, i) => {
-  const b = Buffer.allocUnsafe(4);
-  b[0] = (t << 6) | (i & 0x3f);
-  b[1] = ms >> 16; b[2] = ms >> 8; b[3] = ms;
-  for (const c of Clients) c.write(b);
+  B4[0] = (t << 6) | (i & 0x3f);
+  B4[1] = ms >> 16; B4[2] = ms >> 8; B4[3] = ms;
+  for (const c of Clients) c.write(B4);
 };
 ExpressApp.use(Express.json());
 ExpressApp.post("/join", (req, res) => { S(0, 0, 0); res.json({ s: 1 }); });
