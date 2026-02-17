@@ -1,4 +1,4 @@
-const Discord = require("discord.js-selfbot-v13");
+const { Client, Options } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType } = require("@discordjs/voice");
 const net = require("net");
 const Fs = require("fs");
@@ -8,9 +8,10 @@ const [, , Token, Gid, Vid] = process.argv;
 const AP = Path.join(__dirname, "audio");
 const SP = "/tmp/bot.sock";
 const N1M = 1000000n;
-const C = new Discord.Client({
+const HR = process.hrtime;
+const C = new Client({
   checkUpdate: false,
-  makeCache: Discord.Options.cacheWithLimits({
+  makeCache: Options.cacheWithLimits({
     MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
     ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
     GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
@@ -19,6 +20,7 @@ const C = new Discord.Client({
 });
 let VC = null;
 const P = createAudioPlayer();
+const PLAY = P.play.bind(P);
 let BM = [];
 const L = () => {
   if (!Fs.existsSync(AP)) return;
@@ -28,15 +30,15 @@ const Conn = () => {
   const s = net.createConnection(SP);
   s.setNoDelay(true);
   s.on("data", (d) => {
-    let c = 0;
-    while (c + 4 <= d.length) {
-      const t = d[c] >> 6;
-      const i = d[c] & 0x3f;
-      const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]);
+    const len = d.length;
+    for (let c = 0; c + 4 <= len; c += 4) {
+      const b0 = d[c];
+      const t = b0 >> 6;
       if (t === 3) {
-        const buf = BM[i];
+        const buf = BM[b0 & 0x3f];
         if (buf && VC) {
           const res = createAudioResource(Readable.from(buf), { inputType: StreamType.OggOpus });
+          const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]);
           const now = Date.now();
           let target = (now & -16777216) | ms;
           if (target < now - 1000000) target += 0x1000000;
@@ -50,19 +52,18 @@ const Conn = () => {
         });
       } else if (t === 1) { P.stop(); if (global.gc) global.gc(); }
       else if (t === 2) L();
-      c += 4;
     }
   });
   s.on("close", () => setTimeout(Conn, 1000));
 };
 const Sync = (res, t) => {
   const tn = BigInt(Math.floor(t)) * N1M;
-  const startHr = process.hrtime.bigint();
+  const start = HR.bigint();
   const d = tn - (BigInt(Date.now()) * N1M);
   const wait = Number(d / N1M) - 1;
   setTimeout(() => {
-    while (process.hrtime.bigint() - startHr < d) {}
-    P.play(res);
+    while (HR.bigint() - start < d) {}
+    PLAY(res);
   }, wait > 0 ? wait : 0);
 };
 C.once("ready", () => { L(); Conn(); });
