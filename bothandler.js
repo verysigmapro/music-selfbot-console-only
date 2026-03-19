@@ -1,70 +1,107 @@
 const { Client, Options } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType } = require("@discordjs/voice");
-const net = require("net");
+const Net = require("net");
 const Fs = require("fs");
 const Path = require("path");
 const { Readable } = require("stream");
-const [, , Token, Gid, Vid] = process.argv;
-const AP = Path.join(__dirname, "audio");
-const SP = "/tmp/bot.sock";
-const N1M = 1000000n;
-const HR = process.hrtime;
-const C = new Client({
-  checkUpdate: false,
-  makeCache: Options.cacheWithLimits({
-    MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
-    ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
-    GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
-    GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
-  }),
-});
-let VC = null;
-const P = createAudioPlayer();
-const PLAY = P.play.bind(P);
-let BM = [];
-const L = () => {
-  if (!Fs.existsSync(AP)) return;
-  BM = Fs.readdirSync(AP).filter((f) => f.endsWith(".ogg")).sort().map((f) => Fs.readFileSync(Path.join(AP, f)));
-};
-const Conn = () => {
-  const s = net.createConnection(SP);
-  s.setNoDelay(true);
-  s.on("data", (d) => {
-    const len = d.length;
-    for (let c = 0; c + 4 <= len; c += 4) {
-      const b0 = d[c];
-      const t = b0 >> 6;
-      if (t === 3) {
-        const buf = BM[b0 & 0x3f];
-        if (buf && VC) {
-          const res = createAudioResource(Readable.from(buf), { inputType: StreamType.OggOpus });
-          const ms = ((d[c + 1] << 16) | (d[c + 2] << 8) | d[c + 3]);
-          const now = Date.now();
-          let target = (now & -16777216) | ms;
-          if (target < now - 1000000) target += 0x1000000;
-          else if (target > now + 1000000) target -= 0x1000000;
-          Sync(res, target - (VC.ping.udp || 0));
-        }
-      } else if (t === 0) {
-        C.guilds.fetch(Gid).then((g) => {
-          VC = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: g.voiceAdapterCreator });
-          entersState(VC, VoiceConnectionStatus.Ready, 2e4).then(() => VC.subscribe(P));
-        });
-      } else if (t === 1) { P.stop(); if (global.gc) global.gc(); }
-      else if (t === 2) L();
-    }
+const { Worker, isMainThread, parentPort, workerData } = require("worker_threads");
+
+if (!isMainThread) {
+  const HRN = process.hrtime.bigint.bind(process.hrtime);
+  const Sab = new Int32Array(workerData.Sab);
+  parentPort.on("message", ({ Hi, Lo, WaitMs }) => {
+    if (WaitMs > 0) Atomics.wait(Sab, 0, 0, WaitMs);
+    const TargetHr = (BigInt(Hi) << 32n) | BigInt(Lo >>> 0);
+    while (HRN() < TargetHr) {}
+    parentPort.postMessage(1);
   });
-  s.on("close", () => setTimeout(Conn, 1000));
-};
-const Sync = (res, t) => {
-  const tn = BigInt(Math.floor(t)) * N1M;
-  const start = HR.bigint();
-  const d = tn - (BigInt(Date.now()) * N1M);
-  const wait = Number(d / N1M) - 1;
-  setTimeout(() => {
-    while (HR.bigint() - start < d) {}
-    PLAY(res);
-  }, wait > 0 ? wait : 0);
-};
-C.once("ready", () => { L(); Conn(); });
-C.login(Token);
+} else {
+  const [, , Token, Gid, Vid] = process.argv;
+  const AudioPath = Path.join(__dirname, "audio");
+  const SockPath = "/tmp/bot.sock";
+  const Ns = 1000000n;
+  const HRN = process.hrtime.bigint.bind(process.hrtime);
+  const Sab = new SharedArrayBuffer(4);
+  const SyncWorker = new Worker(__filename, { workerData: { Sab } });
+
+  const Discord = new Client({
+    checkUpdate: false,
+    makeCache: Options.cacheWithLimits({
+      MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
+      ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
+      GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
+      GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
+    }),
+  });
+
+  let VC = null;
+  const Player = createAudioPlayer();
+  const Play = Player.play.bind(Player);
+  let Buffers = [];
+  let PendingRes = null;
+
+  SyncWorker.on("message", () => {
+    if (PendingRes) { Play(PendingRes); PendingRes = null; }
+  });
+
+  const LoadBuffers = () => {
+    if (!Fs.existsSync(AudioPath)) return;
+    Buffers = Fs.readdirSync(AudioPath)
+      .filter((F) => F.endsWith(".ogg"))
+      .sort()
+      .map((F) => Fs.readFileSync(Path.join(AudioPath, F)));
+  };
+
+  const Sync = (Res, T) => {
+    const WallNow = BigInt(Date.now()) * Ns;
+    const HrNow = HRN();
+    const Tn = BigInt(Math.floor(T)) * Ns;
+    const Delta = Tn - WallNow;
+    const TargetHr = HrNow + Delta;
+    const WaitMs = Number(Delta / Ns) - 3;
+    PendingRes = Res;
+    SyncWorker.postMessage({
+      Hi: Number(TargetHr >> 32n),
+      Lo: Number(TargetHr & 0xFFFFFFFFn),
+      WaitMs: WaitMs > 0 ? WaitMs : 0,
+    });
+  };
+
+  const Connect = () => {
+    const Sock = Net.createConnection(SockPath);
+    Sock.setNoDelay(true);
+    Sock.on("data", (Data) => {
+      const Len = Data.length;
+      for (let I = 0; I + 4 <= Len; I += 4) {
+        const B0 = Data[I];
+        const Type = B0 >> 6;
+        if (Type === 3) {
+          const Buf = Buffers[B0 & 0x3f];
+          if (Buf && VC) {
+            const Res = createAudioResource(Readable.from(Buf), { inputType: StreamType.OggOpus });
+            const Ms = (Data[I + 1] << 16) | (Data[I + 2] << 8) | Data[I + 3];
+            const Now = Date.now();
+            let Target = (Now & -16777216) | Ms;
+            if (Target < Now - 1000000) Target += 0x1000000;
+            else if (Target > Now + 1000000) Target -= 0x1000000;
+            Sync(Res, Target - Math.min(VC.ping.udp || 0, 80));
+          }
+        } else if (Type === 0) {
+          Discord.guilds.fetch(Gid).then((G) => {
+            VC = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator });
+            entersState(VC, VoiceConnectionStatus.Ready, 2e4).then(() => VC.subscribe(Player));
+          });
+        } else if (Type === 1) {
+          Player.stop();
+          if (global.gc) global.gc();
+        } else if (Type === 2) {
+          LoadBuffers();
+        }
+      }
+    });
+    Sock.on("close", () => setTimeout(Connect, 1000));
+  };
+
+  Discord.once("ready", () => { LoadBuffers(); Connect(); });
+  Discord.login(Token);
+}
