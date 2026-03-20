@@ -1,50 +1,59 @@
-const Net = require("net");
-const Express = require("express");
+const net = require("net");
+const Http = require("http");
 const Fs = require("fs");
 const Path = require("path");
 
-const App = Express();
 const SockPath = "/tmp/bot.sock";
-const AudioPath = Path.join(__dirname, "audio");
-const Cmd = Buffer.allocUnsafe(4);
+const AudioDir = Path.join(__dirname, "audio");
+const LeadMs = 200;
 
 if (Fs.existsSync(SockPath)) Fs.unlinkSync(SockPath);
 
 const Clients = new Set();
+let AudioIndex = [];
 
-const Server = Net.createServer((Sock) => {
+const RebuildIndex = () => {
+  AudioIndex = Fs.existsSync(AudioDir)
+    ? Fs.readdirSync(AudioDir).filter(X => X.endsWith(".ogg")).sort()
+    : [];
+};
+
+const BroadcastBuf = Buffer.allocUnsafe(4);
+
+const Broadcast = (MsgType, Ms, TrackIdx) => {
+  BroadcastBuf[0] = (MsgType << 6) | (TrackIdx & 0x3f);
+  BroadcastBuf[1] = Ms >> 16; BroadcastBuf[2] = Ms >> 8; BroadcastBuf[3] = Ms;
+  for (const Sock of Clients) Sock.write(BroadcastBuf);
+};
+
+const TcpServer = net.createServer(Sock => {
   Sock.setNoDelay(true);
   Clients.add(Sock);
   Sock.on("close", () => Clients.delete(Sock));
   Sock.on("error", () => {});
 });
 
-const Send = (Type, Ms, Index) => {
-  Cmd[0] = (Type << 6) | (Index & 0x3f);
-  Cmd[1] = Ms >> 16;
-  Cmd[2] = Ms >> 8;
-  Cmd[3] = Ms;
-  for (const C of Clients) C.write(Cmd);
+const Routes = {
+  "/join":   () => { Broadcast(0, 0, 0); },
+  "/stop":   () => { Broadcast(1, 0, 0); },
+  "/update": () => { RebuildIndex(); Broadcast(2, 0, 0); },
 };
 
-let FileList = [];
+Http.createServer((Req, Res) => {
+  let Body = "";
+  Req.on("data", C => { Body += C; });
+  Req.on("end", () => {
+    Res.setHeader("Content-Type", "application/json");
+    if (Routes[Req.url]) {
+      Routes[Req.url]();
+    } else if (Req.url === "/play") {
+      const Key = JSON.parse(Body).AudioKey;
+      const TrackIdx = AudioIndex.indexOf(Key + ".ogg");
+      if (TrackIdx !== -1) Broadcast(3, (Date.now() + LeadMs) & 0xffffff, TrackIdx);
+    }
+    Res.end('{"s":1}');
+  });
+}).listen(3000, "0.0.0.0");
 
-const LoadFiles = () => {
-  if (!Fs.existsSync(AudioPath)) { FileList = []; return; }
-  FileList = Fs.readdirSync(AudioPath).filter((F) => F.endsWith(".ogg")).sort();
-};
-
-LoadFiles();
-
-App.use(Express.json());
-App.post("/join",   (Req, Res) => { Send(0, 0, 0); Res.json({ S: 1 }); });
-App.post("/stop",   (Req, Res) => { Send(1, 0, 0); Res.json({ S: 1 }); });
-App.post("/update", (Req, Res) => { LoadFiles(); Send(2, 0, 0); Res.json({ S: 1 }); });
-App.post("/play",   (Req, Res) => {
-  const I = FileList.indexOf(Req.body.AudioKey + ".ogg");
-  if (I !== -1) Send(3, Date.now() + 150, I);
-  Res.json({ S: 1 });
-});
-
-Server.listen(SockPath);
-App.listen(3000, "0.0.0.0");
+RebuildIndex();
+TcpServer.listen(SockPath);
