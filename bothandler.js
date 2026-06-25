@@ -1,13 +1,13 @@
 const { Client, Options } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType } = require("@discordjs/voice");
-const net = require("net");
+const Net = require("net");
 const Fs = require("fs");
 const Path = require("path");
 const { Readable } = require("stream");
 
 const [, , Token, Gid, Vid] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
-const SockPath = "/tmp/bot.sock";
+const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
 const BusyWindowNs = 8_000_000n;
 const Hr = process.hrtime.bigint;
@@ -58,7 +58,7 @@ const LoadAudio = () => {
 };
 
 const Connect = () => {
-  const Sock = net.createConnection(SockPath);
+  const Sock = Net.createConnection(SockPath);
   Sock.setNoDelay(true);
   Sock.on("data", D => {
     const Len = D.length;
