@@ -1,13 +1,13 @@
-const net = require("net");
+const Net = require("net");
 const Http = require("http");
 const Fs = require("fs");
 const Path = require("path");
 
-const SockPath = "/tmp/bot.sock";
+const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const AudioDir = Path.join(__dirname, "audio");
 const LeadMs = 200;
 
-if (Fs.existsSync(SockPath)) Fs.unlinkSync(SockPath);
+if (process.platform !== "win32" && Fs.existsSync(SockPath)) Fs.unlinkSync(SockPath);
 
 const Clients = new Set();
 let AudioIndex = [];
@@ -26,7 +26,7 @@ const Broadcast = (MsgType, Ms, TrackIdx) => {
   for (const Sock of Clients) Sock.write(BroadcastBuf);
 };
 
-const TcpServer = net.createServer(Sock => {
+const TcpServer = Net.createServer(Sock => {
   Sock.setNoDelay(true);
   Clients.add(Sock);
   Sock.on("close", () => Clients.delete(Sock));
