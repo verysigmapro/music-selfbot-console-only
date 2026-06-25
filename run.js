@@ -7,11 +7,10 @@ const Path = require("path");
 const BotTokens = [
   "MTMxOTEzMDQwNTkyMzk3OTI4NA.GFIuVT.ie80xQqVybw0PANRbrFbpdZ8zCSw_9xDa1Tyho",
   "MTE3MzYyMDE5NzQxMjgzOTU1NA.GyuPZh.qOQVKFGqsdqITZMM2FzYzuh030k0ueGlvgCyWE",
-  "MTE0MjY1MDY4ODc2NjIzMDY0OA.G7QRJs.euVJP5QNwkBwizhf5Gg75KevCRCzDnVe8NPMF0",
   "MTQxNjM4NzkxODM5MzY0MzEzOQ.Gy9Teh.hXPXl7VJxKrTrHAZ7DrsJwIKM9GavNltjegSgQ",
 ];
 const TargetGuildId = "1238452317838377035";
-const TargetVoiceId = "1472098672128032911";
+const TargetVoiceId = "1519697303080796303";
 const AudioPath = Path.join(__dirname, "audio");
 
 const StartProcess = (Script, Args) =>
@@ -35,8 +34,8 @@ const PostCommand = (Endpoint, Body = {}) => {
 const GetFileList = () => {
   if (!Fs.existsSync(AudioPath)) return [];
   return Fs.readdirSync(AudioPath)
-    .filter((F) => F.endsWith(".ogg"))
-    .map((F) => F.replace(".ogg", ""));
+    .filter(F => F.endsWith(".ogg"))
+    .map(F => F.replace(".ogg", ""));
 };
 
 console.clear();
@@ -45,8 +44,7 @@ StartProcess("host.js", []);
 setTimeout(() => {
   BotTokens.forEach((Token, Index) => {
     setTimeout(
-      () =>
-        StartProcess("bothandler.js", [Token, TargetGuildId, TargetVoiceId]),
+      () => StartProcess("bothandler.js", [Token, TargetGuildId, TargetVoiceId]),
       Index * 1250
     );
   });
@@ -60,7 +58,7 @@ Interface.setPrompt("> ");
 
 console.log("join | stop | list | play <number>");
 
-Interface.on("line", (Line) => {
+Interface.on("line", Line => {
   const Input = Line.trim();
   if (!Input) return Interface.prompt();
   const FileArray = GetFileList();
