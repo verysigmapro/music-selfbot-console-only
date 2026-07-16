@@ -7,18 +7,7 @@ def ProcessAudio(InputFile):
     Command = [
         "ffmpeg",
         "-i", InputFile,
-        "-af", "volume=0.25",
         "-c:a", "libopus",
-        "-b:a", "48k",
-        "-vbr", "off",
-        "-compression_level", "10",
-        "-frame_duration", "20",
-        "-application", "lowdelay",
-        "-ar", "48000",
-        "-ac", "1",
-        "-map_metadata", "-1",
-        "-vn",
-        "-y",
         OutputFile
     ]
     subprocess.run(Command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
