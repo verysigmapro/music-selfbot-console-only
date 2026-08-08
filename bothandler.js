@@ -1,5 +1,5 @@
 const { Client, Options } = require("discord.js-selfbot-v13");
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType } = require("@discordjs/voice");
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType, NoSubscriberBehavior } = require("./voice-index.js");
 const Net = require("net");
 const Fs = require("fs");
 const Path = require("path");
@@ -9,27 +9,10 @@ const [, , Token, Gid, Vid] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
-const BusyWindowNs = 8_000_000n;
+const BusyWindowNs = 5_000_000n;
 const Hr = process.hrtime.bigint;
-const NowMs = () => Number((Hr() - HrEpochOffset) / Ns);
-
-const CalibOffset = () => {
-  let BestJitter = BigInt(2e6);
-  let BestOffset = 0n;
-  for (let I = 0; I < 32; I++) {
-    const T0 = Hr();
-    const Wall = BigInt(Date.now());
-    const T1 = Hr();
-    const Jitter = T1 - T0;
-    if (Jitter < BestJitter) { BestJitter = Jitter; BestOffset = T0 - Wall * Ns; }
-  }
-  return BestOffset;
-};
-
-let HrEpochOffset = CalibOffset();
-setInterval(() => {
-  if (AudioPlayer.state.status === "idle") HrEpochOffset = CalibOffset();
-}, 30_000);
+const SILENCE = Buffer.from([0xF8, 0xFF, 0xFE]);
+const PRIME_PACKETS = 250;
 
 const C = new Client({
   checkUpdate: false,
@@ -42,19 +25,54 @@ const C = new Client({
 });
 
 let Vc = null;
-const AudioPlayer = createAudioPlayer();
-const PlayFn = AudioPlayer.play.bind(AudioPlayer);
-let AudioStreams = [];
+const AudioPlayer = createAudioPlayer({
+  behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 1000 },
+});
+
+let WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
+setInterval(() => {
+  if (AudioPlayer.state.status === "idle") WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
+}, 5000);
+
+let AudioFiles = [];
+let PlayHandle = null;
 
 const LoadAudio = () => {
   if (!Fs.existsSync(AudioPath)) return;
-  AudioStreams = Fs.readdirSync(AudioPath)
+  AudioFiles = Fs.readdirSync(AudioPath)
     .filter(F => F.endsWith(".ogg"))
-    .sort()
-    .map(F => {
-      const Buf = Fs.readFileSync(Path.join(AudioPath, F));
-      return () => createAudioResource(Readable.from(Buf), { inputType: StreamType.OggOpus });
-    });
+    .sort((A, B) => A.toLowerCase().localeCompare(B.toLowerCase()))
+    .map(F => Path.join(AudioPath, F));
+};
+
+const MakeSilenceStream = () => {
+  const S = new Readable({ objectMode: true, read() {} });
+  for (let I = 0; I < PRIME_PACKETS; I++) S.push(SILENCE);
+  S.push(null);
+  return S;
+};
+
+const PrimeJitterBuffer = () => new Promise(Resolve => {
+  const Res = createAudioResource(MakeSilenceStream(), { inputType: StreamType.Opus });
+  AudioPlayer.play(Res);
+  AudioPlayer.once("stateChange", (_, N) => { if (N.status === "idle") Resolve(); });
+});
+
+const Play = (FilePath, TargetMs) => {
+  if (PlayHandle) { clearTimeout(PlayHandle); clearImmediate(PlayHandle); PlayHandle = null; }
+  AudioPlayer.stop(true);
+
+  const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
+  const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+
+  const Fire = () => {
+    while (Hr() < TargetNs) {}
+    AudioPlayer.play(Res);
+  };
+
+  const SleepMs = Number((TargetNs - Hr() - BusyWindowNs) / Ns);
+  if (SleepMs > 1) PlayHandle = setTimeout(Fire, SleepMs);
+  else Fire();
 };
 
 const Connect = () => {
@@ -62,37 +80,34 @@ const Connect = () => {
   Sock.setNoDelay(true);
   Sock.on("data", D => {
     const Len = D.length;
-    for (let I = 0; I + 4 <= Len; I += 4) {
+    for (let I = 0; I + 9 <= Len; I += 9) {
       const B0 = D[I];
       const MsgType = B0 >> 6;
       if (MsgType === 3) {
-        const MakeRes = AudioStreams[B0 & 0x3f];
-        if (MakeRes && Vc) {
-          const EncodedMs = (D[I + 1] << 16) | (D[I + 2] << 8) | D[I + 3];
-          const Now = NowMs();
-          let TargetMs = (Math.floor(Now) & -16777216) | EncodedMs;
-          if (TargetMs < Now - 1000000) TargetMs += 0x1000000;
-          else if (TargetMs > Now + 1000000) TargetMs -= 0x1000000;
-          Sched(MakeRes, TargetMs);
+        const FilePath = AudioFiles[B0 & 0x3f];
+        if (FilePath && Vc) {
+          const Hi = D[I + 1];
+          const Lo = ((D[I + 2] << 24) | (D[I + 3] << 16) | (D[I + 4] << 8) | D[I + 5]) >>> 0;
+          const TargetMs = Hi * 0x100000000 + Lo;
+          Play(FilePath, TargetMs);
         }
       } else if (MsgType === 0) {
         C.guilds.fetch(Gid).then(G => {
-          Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator });
-          entersState(Vc, VoiceConnectionStatus.Ready, 2e4).then(() => Vc.subscribe(AudioPlayer));
+          Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false });
+          entersState(Vc, VoiceConnectionStatus.Ready, 2e4).then(() => {
+            Vc.subscribe(AudioPlayer);
+            PrimeJitterBuffer();
+          });
         });
-      } else if (MsgType === 1) { AudioPlayer.stop(); if (global.gc) global.gc(); }
-      else if (MsgType === 2) LoadAudio();
+      } else if (MsgType === 1) {
+        if (PlayHandle) { clearTimeout(PlayHandle); clearImmediate(PlayHandle); PlayHandle = null; }
+        AudioPlayer.stop(true);
+      } else if (MsgType === 2) {
+        LoadAudio();
+      }
     }
   });
   Sock.on("close", () => setTimeout(Connect, 1000));
-};
-
-const Sched = (MakeRes, TargetMs) => {
-  const TargetNs = BigInt(TargetMs) * Ns + HrEpochOffset;
-  const SleepMs = Number((TargetNs - Hr() - BusyWindowNs) / Ns);
-  const Fire = () => { while (Hr() < TargetNs) {} PlayFn(MakeRes()); };
-  if (SleepMs > 0) setTimeout(Fire, SleepMs);
-  else setImmediate(Fire);
 };
 
 C.once("ready", () => { LoadAudio(); Connect(); });
