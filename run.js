@@ -14,20 +14,20 @@ const TargetVoiceId = "1519697303080796303";
 const AudioPath = Path.join(__dirname, "audio");
 
 const StartProcess = (Script, Args) =>
-  spawn("node", ["--no-warnings", "--expose-gc", Script, ...Args], {
-    stdio: ["inherit", "pipe", "inherit"],
+  spawn("bun", ["--smol", Script, ...Args], {
+    stdio: "inherit",
   });
 
-const PostCommand = (Endpoint, Body = {}) => {
+const PostCommand = (Endpoint, TrackIdx = 0) => {
   const Request = Http.request({
     hostname: "localhost",
     port: 3000,
     path: Endpoint,
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/octet-stream", "Content-Length": 1 },
   });
   Request.on("error", () => {});
-  Request.write(JSON.stringify(Body));
+  Request.write(Buffer.from([TrackIdx]));
   Request.end();
 };
 
@@ -35,6 +35,7 @@ const GetFileList = () => {
   if (!Fs.existsSync(AudioPath)) return [];
   return Fs.readdirSync(AudioPath)
     .filter(F => F.endsWith(".ogg"))
+    .sort((A, B) => A.toLowerCase().localeCompare(B.toLowerCase()))
     .map(F => F.replace(".ogg", ""));
 };
 
@@ -72,10 +73,11 @@ Interface.on("line", Line => {
   } else if (CleanInput.startsWith("play ")) {
     const Query = CleanInput.replace("play ", "").trim();
     const Index = parseInt(Query) - 1;
-    const SelectedFile = FileArray[Index] || Query;
-    PostCommand("/play", { AudioKey: SelectedFile });
+    const TrackIdx = isNaN(Index) ? FileArray.indexOf(Query) : Index;
+    if (TrackIdx >= 0 && TrackIdx < FileArray.length) PostCommand("/play", TrackIdx);
   } else {
-    PostCommand("/play", { AudioKey: CleanInput });
+    const TrackIdx = FileArray.indexOf(CleanInput);
+    if (TrackIdx >= 0) PostCommand("/play", TrackIdx);
   }
   Interface.prompt();
 });
