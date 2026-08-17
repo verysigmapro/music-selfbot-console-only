@@ -1,2 +1,2 @@
 npm install express discord.js-selfbot-v13 @discordjs/voice sodium-native @discordjs/opus
-bun add express @discordjs/voice sodium-native @discordjs/opus
+bun add express @discordjs/voice sodium-native @discordjs/opus discord.js-selfbot-v13
