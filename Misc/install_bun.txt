@@ -1,2 +1,3 @@
 curl -fsSL https://bun.sh/install | bash
 source ~/.bashrc
+bun add express @discordjs/voice sodium-native @discordjs/opus discord.js-selfbot-v13
