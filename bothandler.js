@@ -38,10 +38,10 @@ const Vid = process.env.VID;
   };
 
   const Play = (FilePath, TargetMs) => {
-    if (PlayHandle) { clearTimeout(PlayHandle); clearImmediate(PlayHandle); PlayHandle = null; }
+    if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
     WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
     const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
-    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus, silencePaddingFrames: 0 });
+    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
     const Fire = () => {
       while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
