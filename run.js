@@ -14,7 +14,7 @@ const TargetVoiceId = "1519697303080796303";
 const AudioPath = Path.join(__dirname, "audio");
 
 const StartProcess = (Script, Args, Env = {}) =>
-  spawn("bun", ["--smol", Script, ...Args], {
+  spawn("bun", [Script, ...Args], {
     stdio: "inherit",
     env: { ...process.env, ...Env },
   });
