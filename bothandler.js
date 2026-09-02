@@ -9,7 +9,7 @@ const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
 const BusyWindowNs = 5_000_000n;
-const Hr = () => BigInt(Math.trunc(Bun.nanoseconds()));
+const Hr = process.hrtime.bigint;
 const SILENCE = Buffer.from([0xF8, 0xFF, 0xFE]);
 const PRIME_PACKETS = 250;
 const Gid = process.env.GID;
@@ -77,12 +77,12 @@ const Vid = process.env.VID;
   })));
 
   const JoinAll = async () => {
-    await Promise.all(Clients.map(async (Client, I) => {
-      const G = await Client.guilds.fetch(Gid);
-      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: true, group: String(I + 1) });
+    for (let I = 0; I < Clients.length; I++) {
+      const G = await Clients[I].guilds.fetch(Gid);
+      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
       await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
       Vc.subscribe(AudioPlayer);
-    }));
+    }
     await PrimeJitterBuffer();
   };
 
