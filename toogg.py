@@ -3,7 +3,10 @@ import subprocess
 import os
 
 def ProcessAudio(InputFile):
-    OutputFile = os.path.splitext(InputFile)[0] + ".ogg"
+    OutputFolder = "OpusAudio"
+    os.makedirs(OutputFolder, exist_ok=True)
+    BaseName = os.path.splitext(os.path.basename(InputFile))[0]
+    OutputFile = os.path.join(OutputFolder, BaseName + ".ogg")
     Command = [
         "ffmpeg",
         "-i", InputFile,
