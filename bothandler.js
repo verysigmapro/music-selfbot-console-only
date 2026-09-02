@@ -10,8 +10,6 @@ const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.s
 const Ns = 1_000_000n;
 const BusyWindowNs = 5_000_000n;
 const Hr = process.hrtime.bigint;
-const SILENCE = Buffer.from([0xF8, 0xFF, 0xFE]);
-const PRIME_PACKETS = 250;
 const Gid = process.env.GID;
 const Vid = process.env.VID;
 
@@ -39,20 +37,11 @@ const Vid = process.env.VID;
       .map(F => Path.join(AudioPath, F));
   };
 
-  const PrimeJitterBuffer = () => new Promise(Resolve => {
-    const S = new Readable({ objectMode: true, read() {} });
-    for (let I = 0; I < PRIME_PACKETS; I++) S.push(SILENCE);
-    S.push(null);
-    const Res = createAudioResource(S, { inputType: StreamType.Opus });
-    AudioPlayer.play(Res);
-    AudioPlayer.once("stateChange", (_, N) => { if (N.status === "idle") Resolve(); });
-  });
-
   const Play = (FilePath, TargetMs) => {
     if (PlayHandle) { clearTimeout(PlayHandle); clearImmediate(PlayHandle); PlayHandle = null; }
     WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
     const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
-    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus, silencePaddingFrames: 0 });
     const Fire = () => {
       while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
@@ -83,7 +72,6 @@ const Vid = process.env.VID;
       await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
       Vc.subscribe(AudioPlayer);
     }
-    await PrimeJitterBuffer();
   };
 
   LoadAudio();
