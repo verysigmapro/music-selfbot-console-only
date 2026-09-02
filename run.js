@@ -5,17 +5,18 @@ const Fs = require("fs");
 const Path = require("path");
 
 const BotTokens = [
-  "MTMxOTEzMDQwNTkyMzk3OTI4NA.GFIuVT.ie80xQqVybw0PANRbrFbpdZ8zCSw_9xDa1Tyho",
-  "MTE3MzYyMDE5NzQxMjgzOTU1NA.GyuPZh.qOQVKFGqsdqITZMM2FzYzuh030k0ueGlvgCyWE",
-  "MTQxNjM4NzkxODM5MzY0MzEzOQ.Gy9Teh.hXPXl7VJxKrTrHAZ7DrsJwIKM9GavNltjegSgQ",
+  "MTMxOTEzMDQwNTkyMzk3OTI4NA.GQrpfJ.AdN1E5vBM8LWAmKua4cGaOBxRVvPtufvCEZFTE",
+  "MTM1OTYxODE5ODg3NzYzNDY4MQ.GYByHz.4ftOY5IF2HQoNaZXwlfDKiP1bQ-JQ4tm2l1cCU",
+  "MTQxODI0MDc2NDU1ODk3MDg5MQ.GOtqFQ.l7btkBpTRpvnz4jduOzJszswp0qdlZxag3oqX8",
 ];
 const TargetGuildId = "1238452317838377035";
 const TargetVoiceId = "1519697303080796303";
 const AudioPath = Path.join(__dirname, "audio");
 
-const StartProcess = (Script, Args) =>
+const StartProcess = (Script, Args, Env = {}) =>
   spawn("bun", ["--smol", Script, ...Args], {
     stdio: "inherit",
+    env: { ...process.env, ...Env },
   });
 
 const PostCommand = (Endpoint, TrackIdx = 0) => {
@@ -43,12 +44,7 @@ console.clear();
 StartProcess("host.js", []);
 
 setTimeout(() => {
-  BotTokens.forEach((Token, Index) => {
-    setTimeout(
-      () => StartProcess("bothandler.js", [Token, TargetGuildId, TargetVoiceId]),
-      Index * 1250
-    );
-  });
+  StartProcess("bothandler.js", BotTokens, { GID: TargetGuildId, VID: TargetVoiceId });
 }, 2000);
 
 const Interface = Readline.createInterface({
