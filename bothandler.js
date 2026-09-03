@@ -21,10 +21,7 @@ const Vid = process.env.VID;
     behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 1000 },
   });
 
-  let WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
-  setInterval(() => {
-    if (AudioPlayer.state.status === "idle") WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
-  }, 5000);
+  let WallOffsetNs = 0n;
 
   let AudioFiles = [];
   let PlayHandle = null;
@@ -46,7 +43,8 @@ const Vid = process.env.VID;
       while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
     };
-    const SleepMs = Number((TargetNs - Hr() - BusyWindowNs) / Ns);
+    const DiffNs = TargetNs - Hr() - BusyWindowNs;
+    const SleepMs = DiffNs > 0n ? Number((DiffNs + Ns - 1n) / Ns) : 0;
     if (SleepMs > 0) PlayHandle = setTimeout(Fire, SleepMs);
     else Fire();
   };
