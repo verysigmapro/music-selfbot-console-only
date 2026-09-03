@@ -8,7 +8,7 @@ const [, , ...Tokens] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
-const BusyWindowNs = 1_000_000n;
+const BusyWindowNs = 100_000n;
 const Hr = process.hrtime.bigint;
 const Gid = process.env.GID;
 const Vid = process.env.VID;
