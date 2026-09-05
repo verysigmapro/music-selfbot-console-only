@@ -154,7 +154,7 @@ var Xt = it(function(ts, tt) {
         if (pe(e)) return e;
         if (m.push(e), m.length === 1) {
             var t = HrC(), r = BigInt(he) * 1000000n;
-            P = t + r - t % r, setImmediate(() => q())
+            P = t - t % r, setImmediate(() => q())
         }
         return e
     }
