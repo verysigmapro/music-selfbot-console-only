@@ -2,7 +2,6 @@ const { Client, Options } = require("discord.js-selfbot-v13");
 const Fs = require("fs");
 const Path = require("path");
 const Net = require("net");
-const { Readable } = require("stream");
 
 const [, , ...Tokens] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
@@ -38,8 +37,8 @@ const Vid = process.env.VID;
     if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
     WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
     const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
-    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
     const Fire = () => {
+      const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
       while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
     };
@@ -63,49 +62,47 @@ const Vid = process.env.VID;
     C.login(Token);
   })));
 
-  const JoinAll = async () => {
-    for (let I = 0; I < Clients.length; I++) {
-      const G = await Clients[I].guilds.fetch(Gid);
-      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
-      await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
-      Vc.subscribe(AudioPlayer);
-    }
-  };
+  const JoinAll = () => Promise.all(Clients.map(async (C, I) => {
+    const G = await C.guilds.fetch(Gid);
+    const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
+    await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
+    Vc.subscribe(AudioPlayer);
+  }));
 
   LoadAudio();
 
   const HandleMessage = (D) => {
-    const Len = D.length;
-    for (let I = 0; I + 9 <= Len; I += 9) {
-      const B0 = D[I];
-      const MsgType = B0 >> 6;
-      if (MsgType === 3) {
-        const FilePath = AudioFiles[B0 & 0x3f];
-        if (FilePath) {
-          const Hi = D[I + 1];
-          const Lo = ((D[I + 2] << 24) | (D[I + 3] << 16) | (D[I + 4] << 8) | D[I + 5]) >>> 0;
-          Play(FilePath, Hi * 0x100000000 + Lo);
-        }
-      } else if (MsgType === 0) {
-        JoinAll().catch(() => {});
-      } else if (MsgType === 1) {
-        if (PlayHandle) { clearTimeout(PlayHandle); clearImmediate(PlayHandle); PlayHandle = null; }
-        AudioPlayer.stop(true);
-      } else if (MsgType === 2) {
-        LoadAudio();
+    const B0 = D[0];
+    const MsgType = B0 >> 6;
+    if (MsgType === 3) {
+      const FilePath = AudioFiles[B0 & 0x3f];
+      if (FilePath) {
+        const Hi = D[1];
+        const Lo = ((D[2] << 24) | (D[3] << 16) | (D[4] << 8) | D[5]) >>> 0;
+        Play(FilePath, Hi * 0x100000000 + Lo);
       }
+    } else if (MsgType === 0) {
+      JoinAll().catch(() => {});
+    } else if (MsgType === 1) {
+      if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
+      AudioPlayer.stop(true);
+    } else if (MsgType === 2) {
+      LoadAudio();
     }
   };
 
   const Connect = () => {
     const Sock = Net.createConnection(SockPath);
     Sock.on("error", () => {});
-    let Buf = Buffer.alloc(0);
+    let Buf = Buffer.allocUnsafe(0);
+    let BufLen = 0;
     Sock.on("data", Chunk => {
       Buf = Buffer.concat([Buf, Chunk]);
-      while (Buf.length >= 9) {
-        HandleMessage(Buf.slice(0, 9));
-        Buf = Buf.slice(9);
+      BufLen = Buf.length;
+      while (BufLen >= 9) {
+        HandleMessage(Buf.subarray(0, 9));
+        Buf = Buf.subarray(9);
+        BufLen -= 9;
       }
     });
     Sock.on("close", () => setTimeout(Connect, 1000));
