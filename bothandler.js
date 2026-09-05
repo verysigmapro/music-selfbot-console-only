@@ -62,12 +62,24 @@ const Vid = process.env.VID;
     C.login(Token);
   })));
 
-  const JoinAll = () => Promise.all(Clients.map(async (C, I) => {
-    const G = await C.guilds.fetch(Gid);
-    const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
-    await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
-    Vc.subscribe(AudioPlayer);
-  }));
+  const SyncTimestamps = (Vcs) => {
+    const T0 = Math.floor(Date.now() / 20) * 960;
+    for (const Vc of Vcs) {
+      const Cd = Vc.state?.networking?.state?.connectionData;
+      if (Cd) { Cd.timestamp = T0; Cd.sequence = 0; }
+    }
+  };
+
+  const JoinAll = async () => {
+    const Vcs = await Promise.all(Clients.map(async (C, I) => {
+      const G = await C.guilds.fetch(Gid);
+      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
+      await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
+      Vc.subscribe(AudioPlayer);
+      return Vc;
+    }));
+    SyncTimestamps(Vcs);
+  };
 
   LoadAudio();
 
