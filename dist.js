@@ -124,12 +124,13 @@ var Xt = it(function(ts, tt) {
     }
     o(ue, "trackVoiceConnection");
     var he = 20,
-        V, P = -1,
+        V, P = -1n,
         m = [];
+    var HeNs = 20000000n, BwNs = 100000n, HrC = process.hrtime.bigint;
 
     function q() {
-        if (P === -1) return;
-        P += he;
+        if (P === -1n) return;
+        P += HeNs;
         let e = m.filter((t) => t.checkPlayable());
         for (let t of e) t._stepDispatch();
         le(e)
@@ -138,7 +139,9 @@ var Xt = it(function(ts, tt) {
 
     function le(e) {
         for (let t of e) t._stepPrepare();
-        if (P !== -1) V = setTimeout(() => q(), Math.max(1, P - Date.now()))
+        if (P === -1n) return;
+        var d = P - BwNs - HrC();
+        V = setTimeout(() => { while (HrC() < P) {} q() }, d > 0n ? Number(d) / 1000000 : 0)
     }
     o(le, "prepareNextAudioFrame");
 
@@ -150,8 +153,8 @@ var Xt = it(function(ts, tt) {
     function fe(e) {
         if (pe(e)) return e;
         if (m.push(e), m.length === 1) {
-            let t = Date.now();
-            P = t - t % he, setImmediate(() => q())
+            var t = HrC(), r = BigInt(he) * 1000000n;
+            P = t + r - t % r, setImmediate(() => q())
         }
         return e
     }
@@ -161,7 +164,7 @@ var Xt = it(function(ts, tt) {
         let t = m.indexOf(e);
         if (t === -1) return;
         if (m.splice(t, 1), m.length === 0) {
-            if (P = -1, V !== void 0) clearTimeout(V)
+            if (P = -1n, V !== void 0) clearTimeout(V)
         }
     }
     o(ge, "deleteAudioPlayer");
