@@ -39,6 +39,7 @@ const Vid = process.env.VID;
     const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
     const Fire = () => {
       const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+      SyncTimestamps(TargetMs);
       while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
     };
@@ -62,8 +63,10 @@ const Vid = process.env.VID;
     C.login(Token);
   })));
 
-  const SyncTimestamps = (Vcs) => {
-    const T0 = Math.floor(Date.now() / 20) * 960;
+  let Vcs = [];
+
+  const SyncTimestamps = (TargetMs) => {
+    const T0 = TargetMs * 48;
     for (const Vc of Vcs) {
       const Cd = Vc.state?.networking?.state?.connectionData;
       if (Cd) { Cd.timestamp = T0; Cd.sequence = 0; }
@@ -71,14 +74,13 @@ const Vid = process.env.VID;
   };
 
   const JoinAll = async () => {
-    const Vcs = await Promise.all(Clients.map(async (C, I) => {
+    Vcs = await Promise.all(Clients.map(async (C, I) => {
       const G = await C.guilds.fetch(Gid);
       const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
       await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
       Vc.subscribe(AudioPlayer);
       return Vc;
     }));
-    SyncTimestamps(Vcs);
   };
 
   LoadAudio();
