@@ -7,7 +7,7 @@ const [, , ...Tokens] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
-const BusyWindowNs = 1_000n;
+const BusyWindowNs = 100_000n;
 const Hr = process.hrtime.bigint;
 const Gid = process.env.GID;
 const Vid = process.env.VID;
@@ -66,7 +66,7 @@ const Vid = process.env.VID;
   let Vcs = [];
 
   const SyncTimestamps = (TargetMs) => {
-    const T0 = TargetMs * 48;
+    const T0 = (TargetMs * 48) >>> 0;
     for (const Vc of Vcs) {
       const Cd = Vc.state?.networking?.state?.connectionData;
       if (Cd) { Cd.timestamp = T0; Cd.sequence = 0; }
