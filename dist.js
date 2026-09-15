@@ -765,7 +765,7 @@ to ${M(e)}`)
     o(F, "stringifyState");
 
     function Te(e) {
-        let t = e.find((s) => De.includes(s));
+        let t = De.find((s) => e.includes(s));
         if (!t) throw Error(`No compatible encryption modes. Available include: ${e.join(", ")}`);
         return t
     }

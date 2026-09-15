@@ -7,7 +7,6 @@ const [, , ...Tokens] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
 const Ns = 1_000_000n;
-const BusyWindowNs = 1_000n;
 const Hr = process.hrtime.bigint;
 const Gid = process.env.GID;
 const Vid = process.env.VID;
@@ -24,6 +23,7 @@ const Vid = process.env.VID;
 
   let AudioFiles = [];
   let PlayHandle = null;
+  let PendingResource = null;
 
   const LoadAudio = () => {
     if (!Fs.existsSync(AudioPath)) return;
@@ -35,15 +35,22 @@ const Vid = process.env.VID;
 
   const Play = (FilePath, TargetMs) => {
     if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
+    if (PendingResource) {
+      PendingResource.playStream.destroy();
+      PendingResource = null;
+    }
     WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
     const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
+    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+    PendingResource = Res;
     const Fire = () => {
-      const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+      if (PendingResource !== Res) return;
+      PlayHandle = null;
+      PendingResource = null;
       SyncTimestamps(TargetMs);
-      while (Hr() < TargetNs) {}
       AudioPlayer.play(Res);
     };
-    const DiffNs = TargetNs - Hr() - BusyWindowNs;
+    const DiffNs = TargetNs - Hr();
     const SleepMs = DiffNs > 0n ? Number((DiffNs + Ns - 1n) / Ns) : 0;
     if (SleepMs > 0) PlayHandle = setTimeout(Fire, SleepMs);
     else Fire();
@@ -64,23 +71,34 @@ const Vid = process.env.VID;
   })));
 
   let Vcs = [];
+  let JoinPromise = null;
 
   const SyncTimestamps = (TargetMs) => {
-    const T0 = (TargetMs * 48) >>> 0;
+    const Timestamp = (TargetMs * 48) >>> 0;
     for (const Vc of Vcs) {
-      const Cd = Vc.state?.networking?.state?.connectionData;
-      if (Cd) { Cd.timestamp = T0; Cd.sequence = 0; }
+      const ConnectionData = Vc.state?.networking?.state?.connectionData;
+      if (ConnectionData) ConnectionData.timestamp = Timestamp;
     }
   };
 
-  const JoinAll = async () => {
-    Vcs = await Promise.all(Clients.map(async (C, I) => {
+  const JoinAll = () => {
+    if (JoinPromise) return JoinPromise;
+    if (Vcs.length === Clients.length && Vcs.every(Vc => Vc.state.status === VoiceConnectionStatus.Ready)) {
+      return Promise.resolve(Vcs);
+    }
+    JoinPromise = Promise.all(Clients.map(async (C, I) => {
       const G = await C.guilds.fetch(Gid);
-      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: false, group: String(I + 1) });
+      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: true, group: String(I + 1) });
       await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
       Vc.subscribe(AudioPlayer);
       return Vc;
-    }));
+    })).then(Connections => {
+      Vcs = Connections;
+      return Vcs;
+    }).finally(() => {
+      JoinPromise = null;
+    });
+    return JoinPromise;
   };
 
   LoadAudio();
@@ -99,6 +117,10 @@ const Vid = process.env.VID;
       JoinAll().catch(() => {});
     } else if (MsgType === 1) {
       if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
+      if (PendingResource) {
+        PendingResource.playStream.destroy();
+        PendingResource = null;
+      }
       AudioPlayer.stop(true);
     } else if (MsgType === 2) {
       LoadAudio();
