@@ -6,8 +6,6 @@ const Net = require("net");
 const [, , ...Tokens] = process.argv;
 const AudioPath = Path.join(__dirname, "audio");
 const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
-const Ns = 1_000_000n;
-const Hr = process.hrtime.bigint;
 const Gid = process.env.GID;
 const Vid = process.env.VID;
 
@@ -33,27 +31,36 @@ const Vid = process.env.VID;
       .map(F => Path.join(AudioPath, F));
   };
 
-  const Play = (FilePath, TargetMs) => {
+  const Play = (FilePath, TargetTime) => {
     if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
     if (PendingResource) {
       PendingResource.playStream.destroy();
       PendingResource = null;
     }
-    WallOffsetNs = Hr() - BigInt(Date.now()) * Ns;
-    const TargetNs = BigInt(TargetMs) * Ns + WallOffsetNs;
     const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
     PendingResource = Res;
     const Fire = () => {
       if (PendingResource !== Res) return;
       PlayHandle = null;
       PendingResource = null;
-      SyncTimestamps(TargetMs);
+      SyncTimestamps(TargetTime);
       AudioPlayer.play(Res);
     };
-    const DiffNs = TargetNs - Hr();
-    const SleepMs = DiffNs > 0n ? Number((DiffNs + Ns - 1n) / Ns) : 0;
-    if (SleepMs > 0) PlayHandle = setTimeout(Fire, SleepMs);
-    else Fire();
+    
+    const WaitAndFire = () => {
+      while (performance.timeOrigin + performance.now() < TargetTime) {
+        // Spin for microsecond precision
+      }
+      Fire();
+    };
+
+    const Now = performance.timeOrigin + performance.now();
+    const DiffMs = TargetTime - Now;
+    if (DiffMs > 1.5) {
+      PlayHandle = setTimeout(WaitAndFire, DiffMs - 1.5);
+    } else {
+      WaitAndFire();
+    }
   };
 
   const Clients = await Promise.all(Tokens.map(Token => new Promise(Resolve => {
@@ -109,9 +116,8 @@ const Vid = process.env.VID;
     if (MsgType === 3) {
       const FilePath = AudioFiles[B0 & 0x3f];
       if (FilePath) {
-        const Hi = D[1];
-        const Lo = ((D[2] << 24) | (D[3] << 16) | (D[4] << 8) | D[5]) >>> 0;
-        Play(FilePath, Hi * 0x100000000 + Lo);
+        const TargetTime = D.readDoubleLE(1);
+        Play(FilePath, TargetTime);
       }
     } else if (MsgType === 0) {
       JoinAll().catch(() => {});

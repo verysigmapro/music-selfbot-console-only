@@ -1,3 +1,8 @@
+if (typeof Bun === "undefined") {
+  console.error("Error: Please run this script using Bun instead of Node.js (e.g. `bun run.js`)");
+  process.exit(1);
+}
+
 const { spawn } = require("child_process");
 const Readline = require("readline");
 const Http = require("http");
