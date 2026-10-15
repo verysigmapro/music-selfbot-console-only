@@ -1,3 +1,5 @@
+"use strict";
+
 if (typeof Bun === "undefined") {
   console.error("Error: Please run this script using Bun instead of Node.js (e.g. `bun run.js`)");
   process.exit(1);
@@ -5,80 +7,91 @@ if (typeof Bun === "undefined") {
 
 const { spawn } = require("child_process");
 const Readline = require("readline");
-const Http = require("http");
-const Fs = require("fs");
-const Path = require("path");
+const Net = require("net");
+const { SockPath, ListAudio, TrackName } = require("./shared");
 
-const BotTokens = [
-  "MTMxOTEzMDQwNTkyMzk3OTI4NA.GQrpfJ.AdN1E5vBM8LWAmKua4cGaOBxRVvPtufvCEZFTE",
-  "MTM1OTYxODE5ODg3NzYzNDY4MQ.GYByHz.4ftOY5IF2HQoNaZXwlfDKiP1bQ-JQ4tm2l1cCU",
-  "MTQxODI0MDc2NDU1ODk3MDg5MQ.GOtqFQ.l7btkBpTRpvnz4jduOzJszswp0qdlZxag3oqX8",
-];
-const TargetGuildId = "1238452317838377035";
-const TargetVoiceId = "1519697303080796303";
-const AudioPath = Path.join(__dirname, "audio");
+const { TOKENS: Tokens, GID: Gid, VID: Vid } = process.env;
+if (!Tokens || !Gid || !Vid) {
+  console.error("Missing TOKENS, GID or VID. Copy .env.example to .env and fill it in.");
+  process.exit(1);
+}
 
-const StartProcess = (Script, Args, Env = {}) =>
-  spawn("bun", [Script, ...Args], {
-    stdio: "inherit",
-    env: { ...process.env, ...Env },
-  });
+const HostUrl = `http://127.0.0.1:${process.env.PORT || 3000}`;
+const HelpText = "join | stop | list | reload | play <number|name> | quit";
+const Sleep = Ms => new Promise(Resolve => setTimeout(Resolve, Ms));
 
-const PostCommand = (Endpoint, TrackIdx = 0) => {
-  const Request = Http.request({
-    hostname: "localhost",
-    port: 3000,
-    path: Endpoint,
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream", "Content-Length": 1 },
-  });
-  Request.on("error", () => {});
-  Request.write(Buffer.from([TrackIdx]));
-  Request.end();
+const Children = [];
+
+const Start = (Script, Env = {}) => {
+  const Child = spawn(process.execPath, [Script], { stdio: "inherit", env: { ...process.env, ...Env } });
+  Child.on("exit", Code => { if (Code) console.error(`[${Script}] exited with code ${Code}`); });
+  Children.push(Child);
+  return Child;
 };
 
-const GetFileList = () => {
-  if (!Fs.existsSync(AudioPath)) return [];
-  return Fs.readdirSync(AudioPath)
-    .filter(F => F.endsWith(".ogg"))
-    .sort((A, B) => A.toLowerCase().localeCompare(B.toLowerCase()))
-    .map(F => F.replace(".ogg", ""));
-};
+const KillAll = () => Children.forEach(C => C.kill());
+process.on("exit", KillAll);
+process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => process.exit(0));
 
-console.clear();
-StartProcess("host.js", []);
-
-setTimeout(() => {
-  StartProcess("bothandler.js", BotTokens, { GID: TargetGuildId, VID: TargetVoiceId });
-}, 2000);
-
-const Interface = Readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-Interface.setPrompt("> ");
-
-console.log("join | stop | list | play <number>");
-
-Interface.on("line", Line => {
-  const Input = Line.trim();
-  if (!Input) return Interface.prompt();
-  const FileArray = GetFileList();
-  const CleanInput = Input.replace(/"/g, "").replace(".ogg", "");
-  if (CleanInput === "join") {
-    PostCommand("/join");
-  } else if (CleanInput === "stop") {
-    PostCommand("/stop");
-  } else if (CleanInput === "list") {
-    FileArray.forEach((File, Index) => console.log(` ${Index + 1}: ${File}`));
-  } else if (CleanInput.startsWith("play ")) {
-    const Query = CleanInput.replace("play ", "").trim();
-    const Index = parseInt(Query) - 1;
-    const TrackIdx = isNaN(Index) ? FileArray.indexOf(Query) : Index;
-    if (TrackIdx >= 0 && TrackIdx < FileArray.length) PostCommand("/play", TrackIdx);
-  } else {
-    const TrackIdx = FileArray.indexOf(CleanInput);
-    if (TrackIdx >= 0) PostCommand("/play", TrackIdx);
+const WaitForHost = async (Tries = 100) => {
+  for (let I = 0; I < Tries; I++) {
+    const Up = await new Promise(Resolve => {
+      const Sock = Net.connect(SockPath);
+      Sock.once("connect", () => { Sock.destroy(); Resolve(true); });
+      Sock.once("error", () => Resolve(false));
+    });
+    if (Up) return;
+    await Sleep(50);
   }
-  Interface.prompt();
-});
+  throw new Error("host.js did not start");
+};
+
+const Post = Path => fetch(HostUrl + Path, { method: "POST" }).catch(() => {});
+
+const FindTrack = (Query, Files) => {
+  const Names = Files.map(TrackName);
+  let Idx = Names.indexOf(Query);
+  if (Idx === -1) Idx = Names.findIndex(N => N.toLowerCase() === Query.toLowerCase());
+  if (Idx === -1 && /^\d+$/.test(Query)) Idx = Number(Query) - 1;
+  return Idx >= 0 && Idx < Files.length ? Idx : -1;
+};
+
+(async () => {
+  console.clear();
+  Start("host.js");
+  await WaitForHost();
+  Start("bothandler.js");
+
+  const Rl = Readline.createInterface({ input: process.stdin, output: process.stdout });
+  Rl.setPrompt("> ");
+  console.log(HelpText);
+  Rl.prompt();
+
+  Rl.on("line", Line => {
+    const Input = Line.trim().replace(/"/g, "").replace(/\.ogg$/i, "");
+    const [Cmd, ...Rest] = Input.split(/\s+/);
+    const Arg = Rest.join(" ");
+
+    switch (Cmd) {
+      case "":       break;
+      case "join":   Post("/join"); break;
+      case "stop":   Post("/stop"); break;
+      case "reload": Post("/update"); break;
+      case "help":   console.log(HelpText); break;
+      case "quit":
+      case "exit":   process.exit(0);
+      case "list":
+        ListAudio().forEach((F, I) => console.log(` ${I + 1}: ${TrackName(F)}`));
+        break;
+      default: {
+        const Query = Cmd === "play" ? Arg : Input;
+        const Idx = FindTrack(Query, ListAudio());
+        if (Idx >= 0) Post(`/play/${Idx}`);
+        else console.log(`no such track: ${Query}`);
+      }
+    }
+    Rl.prompt();
+  });
+  Rl.on("close", () => process.exit(0));
+})().catch(Err => { console.error(Err.message); process.exit(1); });

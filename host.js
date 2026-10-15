@@ -1,62 +1,87 @@
+"use strict";
+
 const Net = require("net");
-const Http = require("http");
 const Fs = require("fs");
-const Path = require("path");
+const { AudioDir, SockPath, Msg, MaxTracks, ListAudio, EncodeFrame, NowMs } = require("./shared");
 
-const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
-const AudioDir = Path.join(__dirname, "audio");
 const LeadMs = 250;
+const HttpHost = process.env.BIND || "127.0.0.1";
+const HttpPort = Number(process.env.PORT) || 3000;
+const IsPipe = process.platform === "win32";
+const Ok = '{"s":1}';
+const Fail = '{"s":0}';
 
-if (process.platform !== "win32" && Fs.existsSync(SockPath)) Fs.unlinkSync(SockPath);
+if (!IsPipe) {
+  try { Fs.unlinkSync(SockPath); } catch {}
+}
 
 const Clients = new Set();
-let AudioIndex = [];
+let TrackCount = ListAudio().length;
 
-const RebuildIndex = () => {
-  AudioIndex = Fs.existsSync(AudioDir)
-    ? Fs.readdirSync(AudioDir).filter(X => X.endsWith(".ogg")).sort((A, B) => A.toLowerCase().localeCompare(B.toLowerCase()))
-    : [];
+const Broadcast = (Type, TrackIdx = 0, TargetTime = 0) => {
+  const Frame = EncodeFrame(Type, TrackIdx, TargetTime);
+  for (const Sock of Clients) Sock.write(Frame);
 };
 
-const Broadcast = (MsgType, TargetTime, TrackIdx) => {
-  const Buf = Buffer.allocUnsafe(9);
-  Buf[0] = (MsgType << 6) | (TrackIdx & 0x3f);
-  Buf.writeDoubleLE(TargetTime, 1);
-  for (const Sock of Clients) {
-    Sock.cork();
-    Sock.write(Buf);
-    Sock.uncork();
-  }
+const RefreshIndex = () => {
+  TrackCount = ListAudio().length;
+  Broadcast(Msg.Update);
 };
 
-const TcpServer = Net.createServer(Sock => {
-  Sock.setNoDelay(true);
+let WatchTimer = null;
+try {
+  Fs.watch(AudioDir, () => {
+    clearTimeout(WatchTimer);
+    WatchTimer = setTimeout(RefreshIndex, 100);
+  });
+} catch {}
+
+const SockServer = Net.createServer(Sock => {
   Clients.add(Sock);
   Sock.on("close", () => Clients.delete(Sock));
   Sock.on("error", () => {});
 });
+SockServer.listen(SockPath);
 
-const Routes = {
-  "/join":   () => { Broadcast(0, 0, 0); },
-  "/stop":   () => { Broadcast(1, 0, 0); },
-  "/update": () => { RebuildIndex(); Broadcast(2, 0, 0); },
-};
+const Json = (Body, Status = 200) =>
+  new Response(Body, { status: Status, headers: { "Content-Type": "application/json" } });
 
-Http.createServer((Req, Res) => {
-  const Chunks = [];
-  Req.on("data", C => { Chunks.push(C); });
-  Req.on("end", () => {
-    const D = Buffer.concat(Chunks);
-    Res.setHeader("Content-Type", "application/json");
-    if (Routes[Req.url]) {
-      Routes[Req.url]();
-    } else if (Req.url === "/play") {
-      const TrackIdx = D[0];
-      if (TrackIdx < AudioIndex.length) Broadcast(3, performance.timeOrigin + performance.now() + LeadMs, TrackIdx);
+const Server = Bun.serve({
+  hostname: HttpHost,
+  port: HttpPort,
+  async fetch(Req) {
+    if (Req.headers.has("origin")) return Json(Fail, 403);
+
+    const Url = Req.url;
+    const Start = Url.indexOf("/", 8);
+    const Path = Start === -1 ? "/" : Url.slice(Start).split("?", 1)[0];
+
+    switch (Path) {
+      case "/join":   Broadcast(Msg.Join); return Json(Ok);
+      case "/stop":   Broadcast(Msg.Stop); return Json(Ok);
+      case "/update": RefreshIndex(); return Json(Ok);
     }
-    Res.end('{"s":1}');
-  });
-}).listen(3000, "0.0.0.0");
 
-RebuildIndex();
-TcpServer.listen(SockPath);
+    if (Path === "/play" || Path.startsWith("/play/")) {
+      const Idx = Path.length > 5
+        ? Number(Path.slice(6))
+        : new Uint8Array(await Req.arrayBuffer())[0];
+      if (Number.isInteger(Idx) && Idx >= 0 && Idx < TrackCount && Idx < MaxTracks) {
+        Broadcast(Msg.Play, Idx, NowMs() + LeadMs);
+      }
+      return Json(Ok);
+    }
+    return Json(Fail, 404);
+  },
+});
+
+const Shutdown = () => {
+  Server.stop(true);
+  SockServer.close();
+  if (!IsPipe) {
+    try { Fs.unlinkSync(SockPath); } catch {}
+  }
+  process.exit(0);
+};
+process.on("SIGINT", Shutdown);
+process.on("SIGTERM", Shutdown);

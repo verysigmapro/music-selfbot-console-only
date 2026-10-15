@@ -1,154 +1,138 @@
+"use strict";
+
 const { Client, Options } = require("discord.js-selfbot-v13");
 const Fs = require("fs");
 const Path = require("path");
 const Net = require("net");
+const { AudioDir, SockPath, Msg, ListAudio, FrameReader, NowMs } = require("./shared");
 
-const [, , ...Tokens] = process.argv;
-const AudioPath = Path.join(__dirname, "audio");
-const SockPath = process.platform === "win32" ? "\\\\.\\pipe\\bot" : "/tmp/bot.sock";
-const Gid = process.env.GID;
-const Vid = process.env.VID;
+const SpinThresholdMs = 1.5;
+const JoinTimeoutMs = 20000;
+const ReconnectMs = 1000;
+
+const Tokens = (process.env.TOKENS || "").split(/[\s,]+/).filter(Boolean);
+const { GID: Gid, VID: Vid } = process.env;
+
+if (!Tokens.length || !Gid || !Vid) {
+  console.error("bothandler: TOKENS, GID and VID must be set (see .env.example)");
+  process.exit(1);
+}
+
+const LogError = Err => console.error(`[bot] ${Err?.message ?? Err}`);
+
+const MakeCache = Options.cacheWithLimits({
+  MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
+  ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
+  GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
+  GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
+});
+
+const Login = Token => new Promise(Resolve => {
+  const C = new Client({ checkUpdate: false, makeCache: MakeCache });
+  C.once("ready", () => Resolve(C));
+  C.login(Token).catch(Err => {
+    console.error(`[bot] login failed for token ending ...${Token.slice(-4)}: ${Err.message}`);
+    Resolve(null);
+  });
+});
 
 (async () => {
-  const VoiceModule = (await import("./dist.js")).default;
-  const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType, NoSubscriberBehavior } = VoiceModule;
+  const Voice = (await import("./dist.js")).default;
+  const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, StreamType, NoSubscriberBehavior } = Voice;
 
-  const AudioPlayer = createAudioPlayer({
+  const Clients = (await Promise.all(Tokens.map(Login))).filter(Boolean);
+  if (!Clients.length) {
+    console.error("[bot] no account could log in");
+    process.exit(1);
+  }
+
+  const Player = createAudioPlayer({
     behaviors: { noSubscriber: NoSubscriberBehavior.Play, maxMissedFrames: 1000 },
   });
 
-  let WallOffsetNs = 0n;
-
   let AudioFiles = [];
-  let PlayHandle = null;
-  let PendingResource = null;
+  const LoadAudio = () => { AudioFiles = ListAudio().map(F => Path.join(AudioDir, F)); };
+  LoadAudio();
 
-  const LoadAudio = () => {
-    if (!Fs.existsSync(AudioPath)) return;
-    AudioFiles = Fs.readdirSync(AudioPath)
-      .filter(F => F.endsWith(".ogg"))
-      .sort((A, B) => A.toLowerCase().localeCompare(B.toLowerCase()))
-      .map(F => Path.join(AudioPath, F));
-  };
-
-  const Play = (FilePath, TargetTime) => {
-    if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
-    if (PendingResource) {
-      PendingResource.playStream.destroy();
-      PendingResource = null;
-    }
-    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
-    PendingResource = Res;
-    const Fire = () => {
-      if (PendingResource !== Res) return;
-      PlayHandle = null;
-      PendingResource = null;
-      SyncTimestamps(TargetTime);
-      AudioPlayer.play(Res);
-    };
-    
-    const WaitAndFire = () => {
-      while (performance.timeOrigin + performance.now() < TargetTime) {
-        // Spin for microsecond precision
-      }
-      Fire();
-    };
-
-    const Now = performance.timeOrigin + performance.now();
-    const DiffMs = TargetTime - Now;
-    if (DiffMs > 1.5) {
-      PlayHandle = setTimeout(WaitAndFire, DiffMs - 1.5);
-    } else {
-      WaitAndFire();
-    }
-  };
-
-  const Clients = await Promise.all(Tokens.map(Token => new Promise(Resolve => {
-    const C = new Client({
-      checkUpdate: false,
-      makeCache: Options.cacheWithLimits({
-        MessageManager: 0, PresenceManager: 0, UserManager: 0, GuildMemberManager: 0,
-        ThreadManager: 0, GuildEmojiManager: 0, ReactionManager: 0, GuildBanManager: 0,
-        GuildInviteManager: 0, StageInstanceManager: 0, GuildScheduledEventManager: 0,
-        GuildManager: Infinity, ChannelManager: Infinity, VoiceStateManager: Infinity,
-      }),
-    });
-    C.once("ready", () => Resolve(C));
-    C.login(Token);
-  })));
-
-  let Vcs = [];
+  let Connections = [];
   let JoinPromise = null;
+  let PlayTimer = null;
+  let Pending = null;
 
-  const SyncTimestamps = (TargetMs) => {
+  const CancelPending = () => {
+    if (PlayTimer) { clearTimeout(PlayTimer); PlayTimer = null; }
+    if (Pending) { Pending.playStream.destroy(); Pending = null; }
+  };
+
+  const SyncTimestamps = TargetMs => {
     const Timestamp = (TargetMs * 48) >>> 0;
-    for (const Vc of Vcs) {
+    for (const Vc of Connections) {
       const ConnectionData = Vc.state?.networking?.state?.connectionData;
       if (ConnectionData) ConnectionData.timestamp = Timestamp;
     }
   };
 
+  const Play = (FilePath, TargetTime) => {
+    CancelPending();
+    const Res = createAudioResource(Fs.createReadStream(FilePath), { inputType: StreamType.OggOpus });
+    Pending = Res;
+
+    const Fire = () => {
+      if (Pending !== Res) return;
+      while (NowMs() < TargetTime) {}
+      PlayTimer = null;
+      Pending = null;
+      SyncTimestamps(TargetTime);
+      Player.play(Res);
+    };
+
+    const DiffMs = TargetTime - NowMs();
+    if (DiffMs > SpinThresholdMs) PlayTimer = setTimeout(Fire, DiffMs - SpinThresholdMs);
+    else Fire();
+  };
+
+  const AllReady = () =>
+    Connections.length === Clients.length &&
+    Connections.every(Vc => Vc.state.status === VoiceConnectionStatus.Ready);
+
   const JoinAll = () => {
     if (JoinPromise) return JoinPromise;
-    if (Vcs.length === Clients.length && Vcs.every(Vc => Vc.state.status === VoiceConnectionStatus.Ready)) {
-      return Promise.resolve(Vcs);
-    }
+    if (AllReady()) return Promise.resolve(Connections);
     JoinPromise = Promise.all(Clients.map(async (C, I) => {
       const G = await C.guilds.fetch(Gid);
-      const Vc = joinVoiceChannel({ channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator, selfDeaf: true, group: String(I + 1) });
-      await entersState(Vc, VoiceConnectionStatus.Ready, 2e4);
-      Vc.subscribe(AudioPlayer);
+      const Vc = joinVoiceChannel({
+        channelId: Vid, guildId: Gid, adapterCreator: G.voiceAdapterCreator,
+        selfDeaf: true, group: String(I + 1),
+      });
+      await entersState(Vc, VoiceConnectionStatus.Ready, JoinTimeoutMs);
+      Vc.subscribe(Player);
       return Vc;
-    })).then(Connections => {
-      Vcs = Connections;
-      return Vcs;
-    }).finally(() => {
-      JoinPromise = null;
-    });
+    }))
+      .then(Vcs => (Connections = Vcs))
+      .finally(() => { JoinPromise = null; });
     return JoinPromise;
   };
 
-  LoadAudio();
-
-  const HandleMessage = (D) => {
-    const B0 = D[0];
-    const MsgType = B0 >> 6;
-    if (MsgType === 3) {
-      const FilePath = AudioFiles[B0 & 0x3f];
-      if (FilePath) {
-        const TargetTime = D.readDoubleLE(1);
-        Play(FilePath, TargetTime);
+  const OnFrame = (Buf, Off) => {
+    const Head = Buf[Off];
+    switch (Head >> 6) {
+      case Msg.Play: {
+        const FilePath = AudioFiles[Head & 0x3f];
+        if (FilePath) Play(FilePath, Buf.readDoubleLE(Off + 1));
+        break;
       }
-    } else if (MsgType === 0) {
-      JoinAll().catch(() => {});
-    } else if (MsgType === 1) {
-      if (PlayHandle) { clearTimeout(PlayHandle); PlayHandle = null; }
-      if (PendingResource) {
-        PendingResource.playStream.destroy();
-        PendingResource = null;
-      }
-      AudioPlayer.stop(true);
-    } else if (MsgType === 2) {
-      LoadAudio();
+      case Msg.Join:   JoinAll().catch(LogError); break;
+      case Msg.Stop:   CancelPending(); Player.stop(true); break;
+      case Msg.Update: LoadAudio(); break;
     }
   };
 
   const Connect = () => {
     const Sock = Net.createConnection(SockPath);
+    const Reader = new FrameReader(OnFrame);
+    Sock.on("data", Chunk => Reader.Push(Chunk));
     Sock.on("error", () => {});
-    let Buf = Buffer.allocUnsafe(0);
-    let BufLen = 0;
-    Sock.on("data", Chunk => {
-      Buf = Buffer.concat([Buf, Chunk]);
-      BufLen = Buf.length;
-      while (BufLen >= 9) {
-        HandleMessage(Buf.subarray(0, 9));
-        Buf = Buf.subarray(9);
-        BufLen -= 9;
-      }
-    });
-    Sock.on("close", () => setTimeout(Connect, 1000));
+    Sock.on("close", () => setTimeout(Connect, ReconnectMs));
   };
-
   Connect();
-})();
+})().catch(Err => { LogError(Err); process.exit(1); });

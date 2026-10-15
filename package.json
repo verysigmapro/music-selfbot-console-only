@@ -1,0 +1,19 @@
+{
+  "name": "music-selfbot-console-only",
+  "private": true,
+  "scripts": {
+    "start": "bun run.js",
+    "bench": "bun bench/bench.js . optimized 8 5000"
+  },
+  "dependencies": {
+    "@snazzah/davey": "*",
+    "discord-api-types": "*",
+    "discord.js-selfbot-v13": "*",
+    "prism-media": "*",
+    "sodium-native": "*",
+    "ws": "*"
+  },
+  "optionalDependencies": {
+    "@discordjs/opus": "*"
+  }
+}
